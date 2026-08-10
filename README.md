@@ -11,7 +11,7 @@ I will use this repository to keep track of notebooks and scripts which I use as
 * [x] Allow transmission to vary by EffectiveART/NonSuppressiveART status
 * [x] Allow mortality to vary by EffectiveART/NonSuppressiveART status, as well as age, sex, and duration on ART, qualitatively following ARTMortalityTable from EMOD-HIV
 * [x] Adopting a calculated art mortality that doesn't quite use the ARTMortality Table hard-coded in.
-  * [x] Verified that mortality while on ART is now bounded by mortality while off ART
+  * [x] Verified that mortality while on ART is now bounded by mortality while off ART for all demographic groups
 
 ## Future change ideas
 

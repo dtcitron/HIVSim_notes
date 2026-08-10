@@ -15,13 +15,19 @@ current implementation to validate now, not two to compare.
 
 `get_art_mortality_hazard` computes:
 
-    rate = off_art_rate(cd4) * rel_art_mortality[effective?] * age_mult(age) * rel_death_f?
+    rate = off_art_rate(cd4) * rel_art_mortality[effective? / sex] * age_mult(age) * rel_death_f?
 
+The non-suppressive relative-mortality factor is sex-specific
+(`rel_art_mortality_unsupp_m`/`_f`), so the non-suppressive/effective
+mortality RATIO can differ by sex -- currently 2x higher for men
+(`0.7/0.25=2.8`) than for women (`0.35/0.25=1.4`); `rel_death_f` cancels out
+of that ratio since it applies equally to both adherence categories.
 Anchoring to `off_art_rate(cd4)` (the same CD4 table `make_p_hiv_death` uses
 off-ART) guarantees, BY CONSTRUCTION, that on-ART mortality can never exceed
 off-ART mortality at the same CD4 count -- as long as
-`rel_art_mortality_unsupp * (largest age/sex/duration multiplier) <= 1`
-(true for the shipped defaults: `0.7 * 1.32 = 0.924`).
+`rel_art_mortality_unsupp_m * (largest age/duration multiplier) <= 1`
+(true for the shipped defaults: `0.7 * 1.32 = 0.924`; `_f` is smaller, so
+it's covered too).
 
 Provides:
   1. `AgeCD4ARTMortalityTracker` -- a single tracker that records deaths and
@@ -215,6 +221,7 @@ def plot_yearly_mortality(yearly):
     axes[0].set_ylabel('Annual death rate (deaths / person-years)')
     fig.suptitle('Annual HIV death rate per year, by ART status')
     fig.tight_layout()
+    plt.close(fig)  # avoid double-display in notebooks: inline backend auto-shows open figures, AND returning one triggers rich-display
     return fig
 
 
@@ -256,7 +263,7 @@ def check_off_art_higher(summary):
     CD4 hazard (see module docstring), this is expected to ALWAYS pass -- a
     violation here (beyond stochastic noise in thin cells) means the
     invariant has broken, e.g. via an age_mult/art_death_dur override large
-    enough to push rel_art_mortality_unsupp * (largest multiplier) above 1.
+    enough to push rel_art_mortality_unsupp_m/f * (largest multiplier) above 1.
     """
     categories = ['off_art', 'on_effective_art', 'on_nonsuppressive_art']
     wide = summary[summary['category'].isin(categories)].pivot_table(
@@ -302,6 +309,7 @@ def plot_mortality_by_status(summary, age_labels, cd4_labels, sex):
                 ax.set_ylabel(f'Age {age_label}\nAnnual death rate')
     fig.suptitle(f'HIV mortality rate by ART status, age x CD4 (sex={sex})')
     fig.tight_layout()
+    plt.close(fig)  # avoid double-display in notebooks: inline backend auto-shows open figures, AND returning one triggers rich-display
     return fig
 
 
@@ -333,16 +341,20 @@ def on_art_rate_analytic(age, cd4, sex, effective, pars=None):
     on this branch -- pass a HIVPars with art_death_dur set if you want it).
 
     Anchored to off_art_rate_analytic(cd4) -- same CD4 table used off-ART --
-    scaled by a relative-mortality factor per adherence category, then by
-    age/sex multipliers. This structurally guarantees on-ART <= off-ART at
-    the same CD4 (the fix for the upper-bound violation found earlier).
+    scaled by a relative-mortality factor per adherence category (sex-specific
+    for non-suppressive ART, so the non-suppressive/effective ratio can differ
+    by sex), then by age/sex multipliers. This structurally guarantees on-ART
+    <= off-ART at the same CD4 (the fix for the upper-bound violation found earlier).
     """
     pars = pars or pull_hiv_pars()
     age = np.asarray(age, dtype=float)
     cd4 = np.asarray(cd4, dtype=float)
 
     rate = off_art_rate_analytic(cd4, pars=pars) * np.ones_like(age)
-    rel_art_mortality = pars.rel_art_mortality_effective if effective else pars.rel_art_mortality_unsupp
+    if effective:
+        rel_art_mortality = pars.rel_art_mortality_effective
+    else:
+        rel_art_mortality = pars.rel_art_mortality_unsupp_m if sex == 'm' else pars.rel_art_mortality_unsupp_f
     rate = rate * rel_art_mortality
     if sex == 'f':
         rate = rate * pars.rel_death_f
@@ -404,25 +416,30 @@ def print_multiplier_stages(pars=None):
     print(f'  (rel_death = {pars.rel_death} multiplies these, for both off-ART and on-ART)')
     print('--- Relative-mortality factors (fraction of off-ART rate retained on ART) ---')
     print(f'  rel_art_mortality_effective: {pars.rel_art_mortality_effective}')
-    print(f'  rel_art_mortality_unsupp (non-suppressive ART): {pars.rel_art_mortality_unsupp}')
-    print(f'  rel_death_f (female, on ART): {pars.rel_death_f}')
+    print(f'  rel_art_mortality_unsupp_m (non-suppressive ART, males): {pars.rel_art_mortality_unsupp_m}')
+    print(f'  rel_art_mortality_unsupp_f (non-suppressive ART, females): {pars.rel_art_mortality_unsupp_f}')
+    print(f'  rel_death_f (female, on ART, both adherence categories): {pars.rel_death_f}')
+    print(f'  --> non-suppressive/effective mortality ratio: male={pars.rel_art_mortality_unsupp_m / pars.rel_art_mortality_effective:.2f}, '
+          f'female={pars.rel_art_mortality_unsupp_f / pars.rel_art_mortality_effective:.2f} '
+          f'(rel_death_f cancels out of this ratio, since it applies equally to both categories)')
     print('--- On-ART age_mult (HIVPars.art_death_age) ---')
     print(pd.DataFrame(pars.art_death_age, columns=['age_lo', 'age_hi', 'mult']).to_string(index=False))
     print()
     # Invariant check: on-ART rate = off_art_rate(cd4) * rel_art_mortality * age_mult
     # [* rel_death_f]. Since off_art_rate(cd4) is the SAME shared factor on both
     # sides, on-ART <= off-ART at every CD4 count iff
-    # rel_art_mortality * (largest age/sex multiplier) <= 1 -- checked here for
-    # the worst case (non-suppressive, since rel_art_mortality_unsupp > effective's).
+    # rel_art_mortality * (largest age multiplier) <= 1 -- checked here for the
+    # worst case (non-suppressive males, since rel_art_mortality_unsupp_m is the
+    # larger of the two sex-specific values, and rel_death_f < 1 only helps females).
     max_age_mult = max(mult for _, _, mult in pars.art_death_age)
-    worst_case_factor = pars.rel_art_mortality_unsupp * max_age_mult  # rel_death_f < 1, so male is the worse case
+    worst_case_factor = pars.rel_art_mortality_unsupp_m * max_age_mult
     print(f'Worst-case combined multiplier (non-suppressive, oldest age band, male): '
-          f'{pars.rel_art_mortality_unsupp} * {max_age_mult} = {worst_case_factor:.4f}')
+          f'{pars.rel_art_mortality_unsupp_m} * {max_age_mult} = {worst_case_factor:.4f}')
     if worst_case_factor <= 1:
         print('  --> <= 1: on-ART mortality can never exceed off-ART mortality at the same CD4, for any age/sex/adherence.')
     else:
         print('  --> > 1: the on-ART-never-exceeds-off-ART invariant is VIOLATED for this combination -- '
-              'lower rel_art_mortality_unsupp or the age multipliers.')
+              'lower rel_art_mortality_unsupp_m or the age multipliers.')
 
 
 def plot_analytic_heatmaps(age_vals, cd4_vals, grids, vmin=None, vmax=None):
@@ -455,6 +472,7 @@ def plot_analytic_heatmaps(age_vals, cd4_vals, grids, vmin=None, vmax=None):
     fig.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.08, wspace=0.15, hspace=0.15)
     cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])  # [left, bottom, width, height], figure-fraction
     fig.colorbar(im, cax=cbar_ax, label='Annual mortality rate')
+    plt.close(fig)  # avoid double-display in notebooks: inline backend auto-shows open figures, AND returning one triggers rich-display
     return fig
 
 
