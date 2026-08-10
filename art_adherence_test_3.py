@@ -1,49 +1,39 @@
 """
-ART mortality test/validation script -- tracks and plots HIV-related
-mortality both via STIsim simulation and via closed-form (no-simulation)
-numerical evaluation of the exact same formulas.
+Verify that HIV-related mortality is higher off ART than on ART, once you
+control for CD4 count, age, and sex.
 
-Consolidates what were previously three separate files (art_adherence_test.py,
-art_adherence_test_2.py, art_adherence_test_3.py) into one, updated for the
-CURRENT `HIV.get_art_mortality_hazard` (anchored to the off-ART CD4 hazard;
-see stisim/diseases/hiv.py and art_implementation_notes.md). The earlier
-files' "old" (`use_art_mortality_table=False`) vs. "new" (PR #561's
-`art_death_rate`) comparison is gone -- both were superseded when
-get_art_mortality_hazard was rewritten to fix a real bug (on-ART mortality
-could exceed off-ART mortality at high CD4; see below), so there's only one
-current implementation to validate now, not two to compare.
+This originally surfaced a real bug: with the PR #561 closed-form
+`get_art_mortality_hazard` as first written, on-ART mortality was anchored
+to an INDEPENDENT baseline (`art_death_rate`) rather than the off-ART CD4
+hazard, so at high CD4 the on-ART rate could exceed the off-ART rate --
+non-suppressive ART, and even effective ART, sometimes looked worse than no
+treatment at all (see art_implementation_notes.md and the check output
+below). `get_art_mortality_hazard` was then rewritten to anchor on-ART
+mortality to the off-ART CD4 hazard at the same CD4 count
+(`rate = off_art_rate(cd4) * rel_art_mortality[effective?] * age_mult * rel_death_f?`),
+which guarantees off_art >= on-ART **by construction**, given the shipped
+`rel_art_mortality_unsupp * max(art_death_age mult) <= 1`.
 
-`get_art_mortality_hazard` computes:
+This script now serves two purposes:
+  1. A regression check for that guarantee -- both via an actual (stochastic)
+     STIsim simulation (`run_sim`/`check_off_art_higher`) and via closed-form,
+     no-simulation evaluation of the exact same formula
+     (`compute_analytic_grids`/`print_multiplier_stages`) -- since a violation
+     here now indicates the invariant has broken again (e.g. from overriding
+     `art_death_age`/`art_death_dur` with large multipliers), not an open
+     empirical question.
+  2. A breakdown of the calculation into its individual stages (off-ART CD4
+     table, relative-mortality factors, age multipliers) so it's visible
+     exactly why the invariant holds, not just that it does.
 
-    rate = off_art_rate(cd4) * rel_art_mortality[effective?] * age_mult(age) * rel_death_f?
-
-Anchoring to `off_art_rate(cd4)` (the same CD4 table `make_p_hiv_death` uses
-off-ART) guarantees, BY CONSTRUCTION, that on-ART mortality can never exceed
-off-ART mortality at the same CD4 count -- as long as
-`rel_art_mortality_unsupp * (largest age/sex/duration multiplier) <= 1`
-(true for the shipped defaults: `0.7 * 1.32 = 0.924`).
-
-Provides:
-  1. `AgeCD4ARTMortalityTracker` -- a single tracker that records deaths and
-     person-years per timestep, stratified by age bracket x CD4 bracket x
-     sex x ART status (off_art / on_effective_art / on_nonsuppressive_art).
-     One simulation run feeds BOTH simulation-based views below.
-  2a. Yearly mortality RATE time series, pooled across age/CD4/sex, by
-      category ('any' / 'effective' / 'nonsuppressive' / 'off_art').
-  2b. Age x CD4 faceted mortality rate (for a chosen sex), aggregated over
-      the full sim, plus a pass/fail check (`check_off_art_higher`) that
-      off-ART mortality is never lower than on-ART mortality at the same
-      age/CD4/sex -- the actual regression test for the invariant above.
-  3. Closed-form (no-simulation) views: the exact same off-ART/on-ART rate
-     formulas evaluated directly against live `sti.HIVPars()` values --
-     numeric tables (2, one per sex) and heatmaps -- so simulation noise and
-     cell sample-size limitations can be ruled out when interpreting 2a/2b.
-
-For the ART retention-*duration* analysis (how long people stay on ART, as
-opposed to how likely they are to die while on it), see art_duration_test.py.
-For a frozen historical comparison against the older, now-superseded
-ARTMortalityTable lookup-table implementation, see art_lookup_test.py (not
-live code -- a snapshot from before this fix).
+Produces, for a user-specified sex:
+  - A printed table of annual death rate (deaths / person-years) for four
+    categories -- 'total' (all infected, any ART status), 'off_art',
+    'on_effective_art', 'on_nonsuppressive_art' -- broken out by age bracket
+    and CD4 bracket, from the simulation.
+  - A grid of bar-chart plots faceted by age (rows) x CD4 bracket (columns),
+    each panel comparing the four categories' death rates side by side.
+  - The closed-form multiplier stages, tables, and heatmaps (both sexes).
 """
 import numpy as np
 import pandas as pd
@@ -141,11 +131,7 @@ class AgeCD4ARTMortalityTracker(ss.Analyzer):
 
 
 def run_sim(age_bins, cd4_bins, n_agents=20_000, start=2000, stop=2030, coverage_target=0.6):
-    """
-    Run a single sim with realistic ART testing/coverage and the tracker
-    attached. Returns (tracker, yearvec) -- one run feeds both the yearly
-    time-series view and the age x CD4 faceted view below.
-    """
+    """ Run a single sim with realistic ART testing/coverage and the tracker attached. """
     hiv_test = sti.HIVTest(test_prob_data=0.3, start=start)
     ramp_end = min(start + 4, stop)
     art = sti.ART(coverage={'year': [start, ramp_end, stop], 'value': [0, coverage_target, coverage_target]}, p_effective_art=0.5)
@@ -156,74 +142,14 @@ def run_sim(age_bins, cd4_bins, n_agents=20_000, start=2000, stop=2030, coverage
         analyzers=[AgeCD4ARTMortalityTracker(age_bins, cd4_bins)],
     )
     sim.run(verbose=0)
-    return sim.analyzers.agecd4artmortalitytracker, sim.t.yearvec
-
-
-def yearly_mortality_by_category(tracker, yearvec, age_bins, cd4_bins):
-    """
-    Total mortality per calendar year, pooled across all age/CD4 brackets
-    and both sexes, broken out into four categories: 'any' (on ART of any
-    kind, i.e. effective + non-suppressive combined), 'effective',
-    'nonsuppressive', and 'off_art'. One row per (year, category).
-    """
-    age_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.AGE_OPEN_ENDED_AT) for lo, hi in age_bins]
-    cd4_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.CD4_OPEN_ENDED_AT) for lo, hi in cd4_bins]
-    years = np.floor(yearvec).astype(int)
-    unique_years = sorted(set(years))
-
-    deaths_by_cat = {cat: np.zeros(len(yearvec)) for cat in AgeCD4ARTMortalityTracker.CATEGORIES}
-    py_by_cat = {cat: np.zeros(len(yearvec)) for cat in AgeCD4ARTMortalityTracker.CATEGORIES}
-    for cat in AgeCD4ARTMortalityTracker.CATEGORIES:
-        for age_label in age_labels:
-            for cd4_label in cd4_labels:
-                for sex in ('m', 'f'):
-                    key = f'{age_label}_{cd4_label}_{sex}_{cat}'
-                    deaths_by_cat[cat] += tracker.results[f'deaths_{key}'].values
-                    py_by_cat[cat] += tracker.results[f'person_years_{key}'].values
-
-    deaths_any = deaths_by_cat['on_effective_art'] + deaths_by_cat['on_nonsuppressive_art']
-    py_any = py_by_cat['on_effective_art'] + py_by_cat['on_nonsuppressive_art']
-
-    by_category = [
-        ('any', deaths_any, py_any),
-        ('effective', deaths_by_cat['on_effective_art'], py_by_cat['on_effective_art']),
-        ('nonsuppressive', deaths_by_cat['on_nonsuppressive_art'], py_by_cat['on_nonsuppressive_art']),
-        ('off_art', deaths_by_cat['off_art'], py_by_cat['off_art']),
-    ]
-
-    rows = []
-    for year in unique_years:
-        mask = years == year
-        for category, deaths_arr, py_arr in by_category:
-            deaths = deaths_arr[mask].sum()
-            person_years = py_arr[mask].sum()
-            rate = deaths / person_years if person_years > 0 else np.nan
-            rows.append(dict(year=year, category=category, deaths=deaths,
-                              person_years=person_years, annual_death_rate=rate))
-    return pd.DataFrame(rows)
-
-
-def plot_yearly_mortality(yearly):
-    """ Annual death rate (deaths / person-years) per year, one panel per category. """
-    categories = ['any', 'effective', 'nonsuppressive', 'off_art']
-    fig, axes = plt.subplots(1, len(categories), figsize=(5 * len(categories), 4), sharey=True)
-    for ax, category in zip(axes, categories):
-        sub = yearly.query('category == @category').sort_values('year')
-        ax.plot(sub['year'], sub['annual_death_rate'], marker='o', color='tab:blue')
-        ax.set_title(category)
-        ax.set_xlabel('Year')
-    axes[0].set_ylabel('Annual death rate (deaths / person-years)')
-    fig.suptitle('Annual HIV death rate per year, by ART status')
-    fig.tight_layout()
-    return fig
+    return sim.analyzers.agecd4artmortalitytracker
 
 
 def summarize_mortality_by_status(tracker, age_bins, cd4_bins, sex):
     """
     Tidy DataFrame, one row per (age_band, cd4_band, category), for a given
-    sex ('m' or 'f'), aggregated over the FULL simulation (not per-year).
-    category is one of 'total' (all three ART-status categories combined),
-    'off_art', 'on_effective_art', 'on_nonsuppressive_art'.
+    sex ('m' or 'f'). category is one of 'total' (all three ART-status
+    categories combined), 'off_art', 'on_effective_art', 'on_nonsuppressive_art'.
     """
     age_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.AGE_OPEN_ENDED_AT) for lo, hi in age_bins]
     cd4_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.CD4_OPEN_ENDED_AT) for lo, hi in cd4_bins]
@@ -253,8 +179,8 @@ def check_off_art_higher(summary):
     on-ART categories, in every age x CD4 cell with enough data to compare?
 
     Since get_art_mortality_hazard anchors on-ART mortality to the off-ART
-    CD4 hazard (see module docstring), this is expected to ALWAYS pass -- a
-    violation here (beyond stochastic noise in thin cells) means the
+    CD4 hazard (see module docstring), this is now expected to ALWAYS pass
+    -- a violation here (beyond stochastic noise in thin cells) means the
     invariant has broken, e.g. via an age_mult/art_death_dur override large
     enough to push rel_art_mortality_unsupp * (largest multiplier) above 1.
     """
@@ -277,9 +203,7 @@ def plot_mortality_by_status(summary, age_labels, cd4_labels, sex):
     """
     Grid of bar-chart panels faceted by age (rows) x CD4 bracket (columns).
     Each panel compares annual death rate for total / off_art /
-    on_effective_art / on_nonsuppressive_art, side by side. Y axes are
-    independent per panel (not shared) since CD4 drives ~100x differences
-    in scale -- a shared axis would flatten the high-CD4 panels unreadably.
+    on_effective_art / on_nonsuppressive_art, side by side.
     """
     categories = ['total', 'off_art', 'on_effective_art', 'on_nonsuppressive_art']
     colors = {'total': 'tab:gray', 'off_art': 'tab:red', 'on_effective_art': 'tab:green', 'on_nonsuppressive_art': 'tab:orange'}
@@ -313,7 +237,7 @@ def pull_hiv_pars():
     two different branches' code can't be imported in the same process) --
     this script only ever needs the currently-checked-out branch's own
     values, so pulling them live avoids the exact stale-duplicate problem
-    that produced an earlier `art_death_rate` docs/code mismatch.
+    that produced the art_death_rate 0.00554-vs-0.0186 docs/code mismatch.
     """
     return sti.HIVPars()
 
@@ -374,9 +298,9 @@ def compute_analytic_grids(age_vals, cd4_vals, pars=None):
 
 def print_analytic_tables(age_vals, cd4_vals, grids):
     """
-    Print 2 tables (one per sex): for each sex, one age x CD4 table per
-    category (off_art / on_effective_art / on_nonsuppressive_art), grouped
-    together under that sex's heading.
+    Print the 2 tables (one per sex) requested: for each sex, one age x CD4
+    table per category (off_art / on_effective_art / on_nonsuppressive_art),
+    grouped together under that sex's heading.
     """
     categories = ['off_art', 'on_effective_art', 'on_nonsuppressive_art']
     for sex in ('m', 'f'):
@@ -447,11 +371,10 @@ def plot_analytic_heatmaps(age_vals, cd4_vals, grids, vmin=None, vmax=None):
             if row == 1:
                 ax.set_xlabel('CD4 count')
     fig.suptitle('Closed-form (no simulation) annual mortality rate: age x CD4, by sex and ART status')
-    # NB: fig.colorbar(im, ax=axes) followed by tight_layout() causes the colorbar
-    # to overlap the rightmost column -- tight_layout() re-flows the grid without
-    # knowing space was already reserved for the colorbar. Instead, explicitly
-    # reserve the right margin via subplots_adjust, then place the colorbar in its
-    # own axis within that margin.
+    # NB: fig.colorbar(im, ax=axes) followed by tight_layout() is what caused the
+    # overlap -- tight_layout() re-flows the grid without knowing space was already
+    # reserved for the colorbar. Instead, explicitly reserve the right margin via
+    # subplots_adjust, then place the colorbar in its own axis within that margin.
     fig.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.08, wspace=0.15, hspace=0.15)
     cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])  # [left, bottom, width, height], figure-fraction
     fig.colorbar(im, cax=cbar_ax, label='Annual mortality rate')
@@ -460,41 +383,30 @@ def plot_analytic_heatmaps(age_vals, cd4_vals, grids, vmin=None, vmax=None):
 
 if __name__ == '__main__':
 
-    # Specify your own age/CD4 brackets, and which sex to plot (for the age x
-    # CD4 faceted view), here
+    # Specify your own age/CD4 brackets, and which sex to plot, here
     age_bins = [(0, 25), (25, 35), (35, 45), (45, 200)]
     cd4_bins = [(0, 200), (200, 350), (350, 500), (500, 100_000)]
     SEX = 'f'  # 'm' or 'f'
 
-    age_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.AGE_OPEN_ENDED_AT) for lo, hi in age_bins]
-    cd4_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.CD4_OPEN_ENDED_AT) for lo, hi in cd4_bins]
-
-    # ==================================================================
-    # PART 1: simulation-based. One run, two derived views.
-    # ==================================================================
-    tracker, yearvec = run_sim(age_bins, cd4_bins, n_agents=20_000, start=2000, stop=2030)
-
-    # 1a. Yearly mortality rate, pooled across age/CD4/sex, by ART status
-    yearly = yearly_mortality_by_category(tracker, yearvec, age_bins, cd4_bins)
-    print('Annual HIV death rate per year, by ART status:')
-    print(yearly.pivot_table(index='year', columns='category', values='annual_death_rate').to_string(float_format='%.4f'))
-    plot_yearly_mortality(yearly)
-
-    # 1b. Age x CD4 faceted mortality rate, for SEX, aggregated over the full sim
-    print()
+    tracker = run_sim(age_bins, cd4_bins, n_agents=20_000, start=2000, stop=2030)
     summary = summarize_mortality_by_status(tracker, age_bins, cd4_bins, sex=SEX)
+
     print(f'Annual HIV death rate by ART status, age x CD4, sex={SEX}:')
     print(summary.pivot_table(index=['age_band', 'cd4_band'], columns='category',
                                values='annual_death_rate').to_string(float_format='%.4f'))
     print()
     check_off_art_higher(summary)
+
+    age_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.AGE_OPEN_ENDED_AT) for lo, hi in age_bins]
+    cd4_labels = [_bin_label(lo, hi, AgeCD4ARTMortalityTracker.CD4_OPEN_ENDED_AT) for lo, hi in cd4_bins]
     plot_mortality_by_status(summary, age_labels, cd4_labels, sex=SEX)
 
-    # ==================================================================
-    # PART 2: closed-form (no simulation) -- exact same math as
-    # make_p_hiv_death/get_art_mortality_hazard, evaluated directly on an
-    # age x CD4 grid, pulling live parameter values from sti.HIVPars().
-    # ==================================================================
+    # ------------------------------------------------------------------
+    # Closed-form (no simulation) version: exact same math as make_p_hiv_death/
+    # get_art_mortality_hazard, evaluated directly on an age x CD4 grid, pulling
+    # live parameter values from sti.HIVPars() -- no stochastic noise, and no
+    # dependence on tracker cell sample sizes.
+    # ------------------------------------------------------------------
     print()
     print_multiplier_stages()
 
