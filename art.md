@@ -48,19 +48,21 @@ Currently, ART is implemented in a way that does reduce mortality but does not d
     5.  Write me a test which allows me to compare the old and new versions of ARTMortality across different. Add this to the art_adherence_test script
 
 5. ARTMortalityTable- second round: Preferred style would be to not include the hard-coded ARTmortalityTable used in EMOD, and instead to include a single function. I am going to work with some comments from colleague Monisha Sharma to implement this a little more cleanly
-   2. need to re-implement the get_art_mortality_hazard to make reference to the baseline mortality for people who are off of ART. This will make it so that nobody who is on art dies faster than someone from the same age/sex/cd4 stratum who is off art
-   3. Need to adjust the ratio of mortality for onnonsuppressiveART/oneffectiveART such that it is different for men and for women. For men it should be 11.4, for women it should be 2.3.
+   1. Need to adjust the ratio of mortality for onnonsuppressiveART/oneffectiveART such that it is different for men and for women. For men it should be 11.4, for women it should be 2.3.
 6. ARTMortalityTable - third round: The original ARTMortalityTable was based on Weibull curves - it remains unclear to me exactly where those tables came from, but I do have a lot of material from Monisha sharma about the sources for everything, including some citations which reference survival models fit to weibull curves;
-   1. Ingest the documents in this folder, which contain a couple of papers that were referenced when creating ARTMortalityTable in the first place
-   2. Give me a written answer in art_implementation_notes.md about how to reconcile the weibull distribution in the literature against the current way of representing/implementing mortality on ART
-   3. for the current version, re-implement the scaling factors for oneffectiveart and on nonsuppressive art using quantitative support from this literature - describe in detail for me in art_implementation_notes how you propose to incorporate the new information in recalculating the mortality values
-   4. describe for me in detail how to implement the weibull survival curves in HIVSim, if possible. Is this something already expressed in how mortailty rates shift with cd4 counts (which are changing over time)?
-   5. Implement the weibull. By the end of this I should have 3 different versions of ART mortality:
+   1. Ingest the documents in this folder: /Users/daniel/Documents/IDM/ART_Mortality_Table_Docs/
+      1. The artmorttable_abstracts.md contains an email describing where artmortality table came from as well as the abstracts from associated papers used to build artmortality table
+      2. This folder also contains three supporting manuscripts and some supplemental documents for building artmortality table.
+   2. Give me a written answer in art_implementation_notes.md describing in detail how to reconcile the weibull distribution in the literature against the current way of representing/implementing mortality on ART. Is this something already expressed in how mortailty rates shift with cd4 counts (which are changing over time)?
+   3. Also give me a written answer describing in detail whether the numerical parameters for calculating artmortality implemented in the current branch, the hard-coded ARTmortalityTable from EMOD, and this new background material can be reconciled quantitatively.
+7. ARTMortalityTable - third round, implementation
+   1. for the current version, re-implement the scaling factors for oneffectiveart and on nonsuppressive art using quantitative support from this literature - describe in detail for me in art_implementation_notes how you propose to incorporate the new information in recalculating the mortality values
+   2. Implement the weibull. By the end of this I should have 3 different versions of ART mortality:
       1. the current version, which has exponential mortality while on art and  enforces off art mortality always above on art mortality (commit 3d1b25603643524de007c34a8f8e2212275c5a9e (HEAD -> pr-561-simplify-art-mortality)) 
       2. updated version which has exponential mortality while on art, accounting for the data ingested
       3. updated version which has weibull mortality
 
-7.  Third round of changes to ART model within HIVSim: ART retention duration
+8.  Third round of changes to ART model within HIVSim: ART retention duration
     1.  Currently for EMOD we have about 15% annual dropout for AYA and 5% annual dropout for adults older than 25 years of age
     2.  Unclear to me exactly how long people remain on ART for on average in a given simulation - give me a python script called art_adherence_test.py which lets me estimate the distribution of time spent on ART
     3.  Give me a plan for how we might specify average time spent on ART depending on demographics (age or sex or other property)
