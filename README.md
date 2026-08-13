@@ -4,6 +4,7 @@ I will use this repository to keep track of notebooks and scripts which I use as
 
 * stisim_tutorial.ipynb - [STISim Tutorials](https://docs.stisim.org/tutorials/tut_intro.html)
 * Testing_new_ART_transmission_and_mortality.ipynb - ART transmission, mortality, duration spot-checks
+  * Changes tested here are described in art_implementation_notes.md
 
 ## Changes made to HIVSim
 

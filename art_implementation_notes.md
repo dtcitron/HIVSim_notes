@@ -48,6 +48,8 @@ How is it different?
 
 ## Current ART Mortality Implementation
 
+Corresponds to `pr-561-simplify-art-mortality` local branch, or `feat/simplify-art-mortality` on remote repo.
+
 ART mortality rate is bounded from above by the `off_art_rate`, stratified by CD4 count. The mortality is then modified by effective/nonsuppressive ART status, age, and gender. Mortality while on effective ART is always lower than on nonsuppressive ART; mortality while on nonsuppressive ART is always lower than mortality off art for all strata.
 
 Mortality while on nonsuppressive ART is higher among men than among women.
