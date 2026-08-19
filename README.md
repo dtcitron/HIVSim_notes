@@ -5,6 +5,8 @@ I will use this repository to keep track of notebooks and scripts which I use as
 * stisim_tutorial.ipynb - [STISim Tutorials](https://docs.stisim.org/tutorials/tut_intro.html)
 * `Testing_new_ART_transmission_and_mortality.ipynb` - ART transmission, mortality, duration spot-checks
   * Changes tested here are described in art_implementation_notes.md
+* `HIVSim_notes/NonProgram_MC_demo.ipynb` - Changes to VMMC which allow for traditional non-medical MC and variable circumcision effectiveness
+  * Changes tested here are described in `vmmc_traditional_circumcision_demo.py` 
 
 ## Changes made to HIVSim
 
@@ -13,6 +15,7 @@ I will use this repository to keep track of notebooks and scripts which I use as
 * [x] Allow mortality to vary by EffectiveART/NonSuppressiveART status, as well as age, sex, and duration on ART, qualitatively following ARTMortalityTable from EMOD-HIV
 * [x] Adopting a calculated art mortality that doesn't quite use the ARTMortality Table hard-coded in.
   * [x] Verified that mortality while on ART is now bounded by mortality while off ART for all demographic groups
+* [x] Allow non-program traditional male circumcision in addition to VMMC
 
 ## Inventory of scripts
 
