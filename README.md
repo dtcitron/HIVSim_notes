@@ -3,7 +3,7 @@
 I will use this repository to keep track of notebooks and scripts which I use as I start to use HIVSim
 
 * stisim_tutorial.ipynb - [STISim Tutorials](https://docs.stisim.org/tutorials/tut_intro.html)
-* Testing_new_ART_transmission_and_mortality.ipynb - ART transmission, mortality, duration spot-checks
+* `Testing_new_ART_transmission_and_mortality.ipynb` - ART transmission, mortality, duration spot-checks
   * Changes tested here are described in art_implementation_notes.md
 
 ## Changes made to HIVSim
@@ -13,6 +13,11 @@ I will use this repository to keep track of notebooks and scripts which I use as
 * [x] Allow mortality to vary by EffectiveART/NonSuppressiveART status, as well as age, sex, and duration on ART, qualitatively following ARTMortalityTable from EMOD-HIV
 * [x] Adopting a calculated art mortality that doesn't quite use the ARTMortality Table hard-coded in.
   * [x] Verified that mortality while on ART is now bounded by mortality while off ART for all demographic groups
+
+## Inventory of scripts
+
+* `Testing_new_ART_transmission_and_mortality.ipynb` - all the scripts showing the features of ART mortality and transmission by adherence, <https://github.com/starsimhub/stisim/pull/556>
+* `art_vls_intervention_demo.py` - shows how effective/nonsuppressive ART coverage can be specified at the moment of ART initiation - demo in `Testing_new_ART_transmission_and_mortality.ipynb`
 
 ## Future change ideas
 
