@@ -16,6 +16,8 @@
 3. We will want to be able to specify multiple varieties of PrEP - oral PrEP, or long-acting cabotegravir or lenacapivir. For this reason, I want to be able to specify the duration and efficacy of the intervention
 4. We will also want to specify adherence, especially for oral PrEP, since variable adherence reduces the efficacy
 5. This means we want to be able to parameterize PrEP with 3 parameters - efficacy, adherence, and duration
-6. Give me a script for test-driving these new changes to PrEP. 
+6. Make sure that prep duration corresponds to the time when prep is due to expire, and that prep expires at the correct time.
+7. Give me a script for test-driving these new changes to PrEP. 
    1. I would like to run a simulation with 10k people and no prep; a scenario where we put 10% of women between the ages of 15 and 35 on oral PrEP (lasts 3 months, 85% efficacy, 75% adherence) at the start of every year; a scenario where we put 500 men and 1000 women between the ages of 15 and 35 on long acting prep (lasts 12 months, 100% efficacy, 100% adherence)
    2. I would like plots which show prevalence and the number of new infections with each of the scenarios over time
+   3. I also want to run a simulation where 100 people are put on prep for 12 months, then it expires, and I want the simulation to show the discrete duration of PrEP - that it expires on time
